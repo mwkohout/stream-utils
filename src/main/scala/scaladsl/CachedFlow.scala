@@ -10,6 +10,8 @@ import scala.util.{Failure, Success}
 import java.util.concurrent.ConcurrentMap
 import java.util.concurrent.CompletionStage
 import scala.concurrent.{ExecutionContextExecutor, Future}
+import scala.jdk.FutureConverters.*
+import scala.jdk.javaapi
 
 object CachedFlow {
 
@@ -18,18 +20,42 @@ object CachedFlow {
     * @param cache
     * @return
     */
-  def apply[I, O, KEY](
+  def apply[I, O, KEY, CACHED](
       keyExtractor: (I => KEY),
-      cache: ConcurrentMap[KEY, Future[O]],
+      cache: ConcurrentMap[KEY, CACHED],
       flow: Flow[I, O, NotUsed]
-  ): Flow[I, O, NotUsed] = Flow
-    .fromGraph(new CachedFlow[I, O, KEY](keyExtractor, () => cache, flow))
-    .flatMapConcat(Source.future(_))
+  )(using toCached: Conversion[Future[O], CACHED])(using toFuture: Conversion[CACHED, Future[O]]): Flow[I, O, NotUsed] = Flow
+    .fromGraph(
+      new CachedFlow[I, O, KEY, CACHED](
+        keyExtractor,
+        toCached,
+        toFuture,
+        () => cache,
+        flow
+      )
+    )
+    .flatMapConcat(Source.future)
 }
 
-class CachedFlow[I, O, KEY](
+given [T]: Conversion[Future[T], CompletionStage[T]] with
+  override def apply(f: Future[T]): CompletionStage[T] =
+    f.asJava
+
+given [T]: Conversion[Future[T], Future[T]] with
+  override def apply(f: Future[T]): Future[T] = f
+
+given [T]: Conversion[CompletionStage[T], Future[T]] with
+  override def apply(cs: CompletionStage[T]): Future[T] =
+    cs.asScala
+
+given [T]: Conversion[CompletionStage[T], CompletionStage[T]] with
+  override def apply(cs: CompletionStage[T]): CompletionStage[T] = cs
+
+class CachedFlow[I, O, KEY, CACHED](
     val keyExtractor: (I => KEY),
-    val cacheBuilder: (() => ConcurrentMap[KEY, Future[O]]),
+    val toCacheType: (Future[O] => CACHED),
+    val toFuture: (CACHED => Future[O]),
+    val cacheBuilder: (() => ConcurrentMap[KEY, CACHED]),
     val calculatorFlow: Flow[I, O, NotUsed]
 ) extends GraphStage[FlowShape[I, Future[O]]] {
 
@@ -49,18 +75,23 @@ class CachedFlow[I, O, KEY](
             val value = grab(in)
             push(
               out,
-              cache.computeIfAbsent(
-                keyExtractor(value),
-                (k => {
-                  val f = Source
-                    .single(value)
-                    .via(calculatorFlow)
-                    .runWith(Sink.head[O])(materializer)
-                  f.onComplete { case Failure(ex) =>
-                    cache.remove(k) // don't cache failures
-                  }(materializer.executionContext)
-                  f
-                })
+              toFuture(
+                cache.computeIfAbsent(
+                  keyExtractor(value),
+                  (k => {
+                    val f = Source
+                      .single(value)
+                      .via(calculatorFlow)
+                      .runWith(Sink.head[O])(materializer)
+                    val handled = f.transform {
+                      case f @ Failure(_) =>
+                        cache.remove(k) // don't cache failures
+                        f
+                      case s @ Success(_) => s // nothing to do
+                    }(materializer.executionContext)
+                    toCacheType(handled)
+                  })
+                )
               )
             )
           }
