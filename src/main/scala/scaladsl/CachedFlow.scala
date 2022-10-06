@@ -15,6 +15,7 @@ import scala.jdk.javaapi
 
 object CachedFlow {
 
+  case class Config(cacheFailure:Boolean)
   /** A cache that is shared across all materializations
     *
     * @param cache
@@ -23,7 +24,8 @@ object CachedFlow {
   def apply[I, O, KEY, CACHED](
       keyExtractor: (I => KEY),
       cache: ConcurrentMap[KEY, CACHED],
-      flow: Flow[I, O, NotUsed]
+      flow: Flow[I, O, NotUsed],
+      config:Config = Config(cacheFailure = false),
   )(using toCached: Conversion[Future[O], CACHED])(using toFuture: Conversion[CACHED, Future[O]]): Flow[I, O, NotUsed] = Flow
     .fromGraph(
       new CachedFlow[I, O, KEY, CACHED](
@@ -31,6 +33,7 @@ object CachedFlow {
         toCached,
         toFuture,
         () => cache,
+        config,
         flow
       )
     )
@@ -56,6 +59,7 @@ class CachedFlow[I, O, KEY, CACHED](
     val toCacheType: (Future[O] => CACHED),
     val toFuture: (CACHED => Future[O]),
     val cacheBuilder: (() => ConcurrentMap[KEY, CACHED]),
+    val config:scaladsl.CachedFlow.Config,
     val calculatorFlow: Flow[I, O, NotUsed]
 ) extends GraphStage[FlowShape[I, Future[O]]] {
 
@@ -85,7 +89,8 @@ class CachedFlow[I, O, KEY, CACHED](
                       .runWith(Sink.head[O])(materializer)
                     val handled = f.transform {
                       case f @ Failure(_) =>
-                        cache.remove(k) // don't cache failures
+                        // don't cache failures
+                        if !config.cacheFailure then {cache.remove(k)}
                         f
                       case s @ Success(_) => s // nothing to do
                     }(materializer.executionContext)

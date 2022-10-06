@@ -46,7 +46,7 @@ class CachedFlowSuite extends munit.FunSuite {
   }
 
 
-  test("when a entry goes through a flow and errors, don't cache the error") {
+  test("when the flow is configured to discard errors") {
 
     import akka.stream.Materializer.matFromSystem
     import concurrent.ExecutionContext.Implicits.global
@@ -66,4 +66,30 @@ class CachedFlowSuite extends munit.FunSuite {
     assertEquals( cache.keySet().size(),0)
 
   }
+  test("when the flow is configured to keep errors in cache") {
+
+    import akka.stream.Materializer.matFromSystem
+    import concurrent.ExecutionContext.Implicits.global
+    import concurrent.duration.DurationInt
+
+    val cache = new ConcurrentHashMap[Int, Future[String]]()
+    val cachedFlow: Flow[Int, String, NotUsed] = Flow.fromFunction[Int, String](i => i.toString)
+      .flatMapConcat(s => Source.failed(new Exception()))
+    intercept[Exception] {
+      val f = Source.single(1)
+        .via(CachedFlow({ (i: Int) => i }, cache = cache, flow = cachedFlow,CachedFlow.Config(cacheFailure = true)))
+        .delay(1.second, DelayOverflowStrategy.backpressure)
+        .runWith(Sink.seq[String])(matFromSystem(ActorSystem()))
+      Await.result(f, 1.second)
+    }
+
+    assertEquals(cache.keySet().size(), 1)
+    assert(cache.keySet() contains (1))
+
+    intercept[Exception]{
+      Await.result(cache.get(1), 1.second)
+    }
+
+  }
+
 }
