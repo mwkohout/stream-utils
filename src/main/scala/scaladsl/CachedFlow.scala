@@ -41,8 +41,8 @@ given [T]: Conversion[Future[T], CompletionStage[T]] with
   override def apply(f: Future[T]): CompletionStage[T] =
     f.asJava
 
-given [T]: Conversion[Future[T], Future[T]] with
-  override def apply(f: Future[T]): Future[T] = f
+given [T]: Conversion[T, T] with
+  override def apply(t: T): T = t
 
 given [T]: Conversion[CompletionStage[T], Future[T]] with
   override def apply(cs: CompletionStage[T]): Future[T] =
