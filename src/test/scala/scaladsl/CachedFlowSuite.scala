@@ -9,6 +9,7 @@ import akka.stream.scaladsl.*
 import akka.stream.javadsl.Sink as JSink
 import akka.testkit.TestProbe
 import scaladsl.*
+import scaladsl.CachedFlow.Config
 
 import java.util.concurrent.{CompletionStage, ConcurrentHashMap, CountDownLatch}
 import scala.concurrent.{Await, Future}
@@ -19,6 +20,20 @@ import scala.language.implicitConversions
 // For more information on writing tests, see
 // https://scalameta.org/munit/docs/getting-started.html
 class CachedFlowSuite extends munit.FunSuite {
+
+  test("when the user provides a future generating function, avoiding the actorsystem's executors"){
+    implicit val actorSystem: ActorSystem = ActorSystem()
+    import akka.stream.Materializer.matFromSystem
+    implicit val ec: scala.concurrent.ExecutionContext = scala.concurrent.ExecutionContext.global
+
+    val cache = CacheBuilder.newBuilder().maximumSize(100).build[Int,Future[String]]().asMap()
+
+    val cacheFunction:(Int=>Future[String])= i=>Future{i.toString}
+
+    val results: Seq[String] = Source(List(1, 1))
+      .via(CachedFlow( (i: Int) => i, cache = () => cache, valueExtractor = cacheFunction))
+      .runWith(Sink.seq[String])(matFromSystem(ActorSystem())).asJava.toCompletableFuture.get();
+  }
   test("when a entry goes through a flow then it's cached as a Future") {
 
     implicit val actorSystem: ActorSystem = ActorSystem()
@@ -92,6 +107,7 @@ class CachedFlowSuite extends munit.FunSuite {
     import concurrent.ExecutionContext.Implicits.global
     import concurrent.duration.DurationInt
 
+    given config:Config = Config(cacheFailure = true)
     val cache = new ConcurrentHashMap[Int, Future[String]]()
     val cachedFlow: Sink[Int, Future[String]] =
       Flow.fromFunction[Int, String](i => i.toString)
@@ -99,7 +115,7 @@ class CachedFlowSuite extends munit.FunSuite {
         .toMat(Sink.head)(Keep.right)
     intercept[Exception] {
       val f = Source.single(1)
-        .via(CachedFlow({ (i: Int) => i }, cache = ()=> cache, valueExtractor = cachedFlow,CachedFlow.Config(cacheFailure = true)))
+        .via(CachedFlow( (i: Int) => i , cache = ()=> cache, valueExtractor = cachedFlow))
         .delay(1.second, DelayOverflowStrategy.backpressure)
         .runWith(Sink.seq[String])(matFromSystem(ActorSystem()))
       Await.result(f, 1.second)
