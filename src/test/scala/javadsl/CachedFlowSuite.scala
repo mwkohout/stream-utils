@@ -14,7 +14,7 @@ class CachedFlowSuite extends munit.FunSuite {
     val cachedFlow = Flow.fromFunction((i:Integer)=>i.toString)
 
     val result: CompletionStage[String] = Source.single[Integer](1)
-      .via(CachedFlow.apply((i: Integer) => i, cache = cache, flow = cachedFlow, config = CachedFlow.Config(false)))
+      .via(CachedFlow.apply((i: Integer) => i, cache = ()=>cache, calculator = cachedFlow, config = CachedFlow.Config(false)))
       .runWith(Sink.head(), ActorSystem.apply());
 
 

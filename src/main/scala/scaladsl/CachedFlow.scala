@@ -2,7 +2,7 @@ package scaladsl
 
 import akka.NotUsed
 import akka.actor.ActorSystem
-import akka.stream.{Attributes, FlowShape, Inlet, Outlet}
+import akka.stream.{Attributes, FlowShape, Inlet, Materializer, Outlet}
 import akka.stream.scaladsl.{Flow, Sink, Source}
 import akka.stream.stage.{GraphStage, GraphStageLogic, InHandler, OutHandler}
 
@@ -16,15 +16,15 @@ import scala.jdk.javaapi
 object CachedFlow {
 
   case class Config(cacheFailure:Boolean)
-  /** A cache that is shared across all materializations
+  /**
     *
     * @param cache
     * @return
     */
   def apply[I, O, KEY, CACHED](
-      keyExtractor: (I => KEY),
-      cache: ConcurrentMap[KEY, CACHED],
-      flow: Flow[I, O, NotUsed],
+      keyExtractor: I => KEY,
+      cache: ()=>ConcurrentMap[KEY, CACHED],
+      calculator: Sink[I, Future[O]],
       config:Config = Config(cacheFailure = false),
   )(using toCached: Conversion[Future[O], CACHED])(using toFuture: Conversion[CACHED, Future[O]]): Flow[I, O, NotUsed] = Flow
     .fromGraph(
@@ -32,9 +32,9 @@ object CachedFlow {
         keyExtractor,
         toCached,
         toFuture,
-        () => cache,
+        cache,
         config,
-        flow
+        (system:ActorSystem,input:I)=> Source.single(input).runWith[Future[O]](calculator)(Materializer(system))
       )
     )
     .flatMapConcat(Source.future)
@@ -60,7 +60,7 @@ class CachedFlow[I, O, KEY, CACHED](
     val toFuture: (CACHED => Future[O]),
     val cacheBuilder: (() => ConcurrentMap[KEY, CACHED]),
     val config:scaladsl.CachedFlow.Config,
-    val calculatorFlow: Flow[I, O, NotUsed]
+    val futureCalculator: (ActorSystem,I)=>CACHED
 ) extends GraphStage[FlowShape[I, Future[O]]] {
 
   val in             = Inlet[I]("CachedFlow.in")
@@ -83,10 +83,7 @@ class CachedFlow[I, O, KEY, CACHED](
                 cache.computeIfAbsent(
                   keyExtractor(value),
                   (k => {
-                    val f = Source
-                      .single(value)
-                      .via(calculatorFlow)
-                      .runWith(Sink.head[O])(materializer)
+                    val f = toFuture(futureCalculator(materializer.system,value))
                     val handled = f.transform {
                       case f @ Failure(_) =>
                         // don't cache failures
