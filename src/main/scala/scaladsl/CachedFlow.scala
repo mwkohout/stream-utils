@@ -5,6 +5,7 @@ import akka.actor.ActorSystem
 import akka.stream.{Attributes, FlowShape, Inlet, Materializer, Outlet}
 import akka.stream.scaladsl.{Flow, Sink, Source}
 import akka.stream.stage.{GraphStage, GraphStageLogic, InHandler, OutHandler}
+import scaladsl.CachedFlow.Config
 
 import scala.util.{Failure, Success}
 import java.util.concurrent.ConcurrentMap
@@ -24,10 +25,11 @@ object CachedFlow {
   def apply[I, O, KEY, CACHED](
                                 keyExtractor: I => KEY,
                                 cache: ()=>ConcurrentMap[KEY, CACHED],
-                                valueExtractor: Sink[I, CACHED],
-                                config:Config = Config(cacheFailure = false),
-  )(using toCached: Conversion[Future[O], CACHED])(using toFuture: Conversion[CACHED, Future[O]]): Flow[I, O, NotUsed] = Flow
-    .fromGraph(
+                                valueExtractor: Sink[I, CACHED])
+                              (using config: Config)
+                              (using toCached: Conversion[Future[O], CACHED])
+                              (using toFuture: Conversion[CACHED, Future[O]]): Flow[I, O, NotUsed] = {
+    Flow.fromGraph(
       new CachedFlow[I, O, KEY, CACHED](
         keyExtractor,
         toCached,
@@ -38,11 +40,31 @@ object CachedFlow {
       )
     )
     .flatMapConcat(Source.future)
-}
+  }
 
+  def apply[I, O, KEY, CACHED](
+                              keyExtractor: I => KEY,
+                              cache: () => ConcurrentMap[KEY, CACHED],
+                              valueExtractor: I=>CACHED)
+                              (using config: Config)
+                              (using toCached: Conversion[Future[O], CACHED])
+                              (using toFuture: Conversion[CACHED, Future[O]]): Flow[I, O, NotUsed] = {
+  Flow.fromGraph(
+    new CachedFlow[I, O, KEY, CACHED](
+      keyExtractor,
+      toCached,
+      toFuture,
+      cache,
+      config,
+      (_: ActorSystem, input: I) => valueExtractor(input)
+    )
+  )
+  .flatMapConcat(Source.future)
+}
+}
+given DefaultCachedConfig:Config = Config(cacheFailure = false);
 given FutureToCompletionStage[T]: Conversion[Future[T], CompletionStage[T]] with
-  override def apply(f: Future[T]): CompletionStage[T] =
-    f.asJava
+  override def apply(f: Future[T]): CompletionStage[T] = f.asJava
 
 given SelfToSelf[T]: Conversion[T, T] with
   override def apply(t: T): T = t
