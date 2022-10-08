@@ -1,6 +1,8 @@
 package javadsl
 
 import akka.NotUsed
+import akka.actor.ActorSystem
+import akka.stream.Materializer
 import akka.stream.scaladsl.{Flow, Keep, Sink, Source}
 import akka.stream.javadsl.{Flow as JFlow, Sink as JSink, Source as JSource}
 
@@ -31,18 +33,21 @@ object CachedFlow {
                         calculator: JFlow[I, O, NotUsed],
                         config: Config = Config(cacheFailure = false)
   ): JFlow[I, O, NotUsed] = {
-    import scaladsl.given_Conversion_Future_CompletionStage
-    import scaladsl.given_Conversion_CompletionStage_Future
 
-    val calc: Sink[I,Future[O]] = calculator.asScala.toMat(Sink.head)(Keep.right)
+    val calc: JSink[I,CompletionStage[O]] = calculator.toMat(JSink.head[O](),akka.stream.javadsl.Keep.right[akka.NotUsed,CompletionStage[O]])
 
-    scaladsl.CachedFlow
-      .apply(
-        keyExtractor = keyExtractor.apply,
-        cache =cache.get,
-        calculator = calc,
-        config = scaladsl.CachedFlow.Config(cacheFailure = config.cacheFailure)
+    val f: (ActorSystem,I)=>CompletionStage[O] = (system:ActorSystem,input:I)=> Source.single(input).runWith(calc)(Materializer(system))
+    Flow
+      .fromGraph(
+        new CachedFlow[I, O, KEY, CompletionStage[O]](
+          keyExtractor.apply,
+          scaladsl.FutureToCompletionStage,
+          scaladsl.CompletionStageToFuture,
+          cache.get,
+          scaladsl.CachedFlow.Config(cacheFailure = config.cacheFailure),
+          f
+        )
       )
-      .asJava
+      .flatMapConcat(Source.future).asJava
   }
 }
