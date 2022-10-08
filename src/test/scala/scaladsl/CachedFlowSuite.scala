@@ -20,9 +20,9 @@ class CachedFlowSuite extends munit.FunSuite {
 
     import akka.stream.Materializer.matFromSystem
     val cache = CacheBuilder.newBuilder().maximumSize(100).build[Int,Future[String]]().asMap()
-    val cachedFlow:Flow[Int,String,NotUsed] = Flow.fromFunction[Int,String](i=>i.toString)
+    val cachedFlow: Sink[Int, Future[String]] = Flow.fromFunction[Int, String](i => i.toString).toMat(Sink.head)(Keep.right)
     val result:String = Source.single(1)
-      .via(CachedFlow({(i:Int)=>i},cache = cache, flow = cachedFlow))
+      .via(CachedFlow({(i:Int)=>i},cache = ()=> cache, calculator = cachedFlow))
       .runWith(Sink.head[String])(matFromSystem(ActorSystem())).asJava.toCompletableFuture.get();
     assertEquals("1",result)
     assertEquals(1, cache.keySet().size())
@@ -35,9 +35,9 @@ class CachedFlowSuite extends munit.FunSuite {
 
     import akka.stream.Materializer.matFromSystem
     val cache = CacheBuilder.newBuilder().maximumSize(100).build[Int, CompletionStage[String]]().asMap()
-    val cachedFlow: Flow[Int, String, NotUsed] = Flow.fromFunction[Int, String](i => i.toString)
+    val cachedFlow: Sink[Int, Future[String]] = Flow.fromFunction[Int, String](i => i.toString).toMat(Sink.head)(Keep.right)
     val result: String = Source.single(1)
-      .via(CachedFlow({ (i: Int) => i }, cache = cache, flow = cachedFlow))
+      .via(CachedFlow({ (i: Int) => i }, cache = ()=>cache, calculator = cachedFlow))
       .runWith(Sink.head[String])(matFromSystem(ActorSystem())).asJava.toCompletableFuture.get();
     assertEquals("1", result)
     assertEquals(1, cache.keySet().size())
@@ -53,11 +53,11 @@ class CachedFlowSuite extends munit.FunSuite {
     import concurrent.duration.DurationInt
 
     val cache = new ConcurrentHashMap[Int,Future[String]]()
-    val cachedFlow: Flow[Int, String, NotUsed] = Flow.fromFunction[Int, String](i => i.toString)
-      .flatMapConcat(s=>Source.failed(new Exception()))
+    val cachedFlow: Sink[Int, Future[String]] = Flow.fromFunction[Int, String](i => i.toString)
+      .flatMapConcat(s=>Source.failed(new Exception())).toMat(Sink.head)(Keep.right)
     intercept[Exception] {
       val f = Source.single(1)
-        .via(CachedFlow({ (i: Int) => i }, cache = cache, flow = cachedFlow))
+        .via(CachedFlow({ (i: Int) => i }, cache = ()=>cache, calculator = cachedFlow))
         .delay(1.second, DelayOverflowStrategy.backpressure)
         .runWith(Sink.seq[String])(matFromSystem(ActorSystem()))
       Await.result(f,1.second)
@@ -73,11 +73,13 @@ class CachedFlowSuite extends munit.FunSuite {
     import concurrent.duration.DurationInt
 
     val cache = new ConcurrentHashMap[Int, Future[String]]()
-    val cachedFlow: Flow[Int, String, NotUsed] = Flow.fromFunction[Int, String](i => i.toString)
-      .flatMapConcat(s => Source.failed(new Exception()))
+    val cachedFlow: Sink[Int, Future[String]] =
+      Flow.fromFunction[Int, String](i => i.toString)
+        .flatMapConcat(s => Source.failed(new Exception()))
+        .toMat(Sink.head)(Keep.right)
     intercept[Exception] {
       val f = Source.single(1)
-        .via(CachedFlow({ (i: Int) => i }, cache = cache, flow = cachedFlow,CachedFlow.Config(cacheFailure = true)))
+        .via(CachedFlow({ (i: Int) => i }, cache = ()=> cache, calculator = cachedFlow,CachedFlow.Config(cacheFailure = true)))
         .delay(1.second, DelayOverflowStrategy.backpressure)
         .runWith(Sink.seq[String])(matFromSystem(ActorSystem()))
       Await.result(f, 1.second)
