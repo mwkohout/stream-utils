@@ -3,8 +3,11 @@ package scaladsl
 import akka.NotUsed
 import akka.actor.ActorSystem
 import akka.stream.DelayOverflowStrategy
+import akka.stream.StreamRefMessages.ActorRef
 import com.google.common.cache.CacheBuilder
 import akka.stream.scaladsl.*
+import akka.stream.javadsl.Sink as JSink
+import akka.testkit.TestProbe
 import scaladsl.*
 
 import java.util.concurrent.{CompletionStage, ConcurrentHashMap, CountDownLatch}
@@ -18,26 +21,43 @@ import scala.language.implicitConversions
 class CachedFlowSuite extends munit.FunSuite {
   test("when a entry goes through a flow then it's cached as a Future") {
 
+    implicit val actorSystem: ActorSystem = ActorSystem()
     import akka.stream.Materializer.matFromSystem
     val cache = CacheBuilder.newBuilder().maximumSize(100).build[Int,Future[String]]().asMap()
-    val cachedFlow: Sink[Int, Future[String]] = Flow.fromFunction[Int, String](i => i.toString).toMat(Sink.head)(Keep.right)
-    val result:String = Source.single(1)
-      .via(CachedFlow({(i:Int)=>i},cache = ()=> cache, calculator = cachedFlow))
-      .runWith(Sink.head[String])(matFromSystem(ActorSystem())).asJava.toCompletableFuture.get();
-    assertEquals("1",result)
+    val testKit:TestProbe = TestProbe()
+    val cachedFlow: Sink[Int, Future[String]] = Flow.fromFunction[Int, String](i => i.toString).map(s=>{
+      testKit.ref.tell(s,akka.actor.Actor.noSender)
+      s
+    })
+      .toMat(Sink.head)(Keep.right)
+    val results:Seq[String] = Source(List(1,1))
+      .via(CachedFlow({(i:Int)=>i},cache = ()=> cache, valueExtractor = cachedFlow))
+      .runWith(Sink.seq[String])(matFromSystem(ActorSystem())).asJava.toCompletableFuture.get();
+
+    //we get the correct result
+    assertEquals(Seq("1", "1"),results)
     assertEquals(1, cache.keySet().size())
+
+    //it only goes through the cache calculator once for this key
+    testKit.expectMsg("1")
+    testKit.expectNoMessage()
+
+    //the cache contains what we'd expect
     assert( cache.keySet()contains(1))
     assert(cache.get(1).isInstanceOf[Future[String]])
 
   }
 
+  /**
+   * this seems sort of ecoteric--that someone would push a scala source into a java sink, then convert it back but it's a legit case.
+   */
   test("when a entry goes through a flow then it's cached as a CompletionStage") {
 
     import akka.stream.Materializer.matFromSystem
     val cache = CacheBuilder.newBuilder().maximumSize(100).build[Int, CompletionStage[String]]().asMap()
-    val cachedFlow: Sink[Int, Future[String]] = Flow.fromFunction[Int, String](i => i.toString).toMat(Sink.head)(Keep.right)
+    val cachedFlow: Sink[Int, CompletionStage[String]] = Flow.fromFunction[Int, String](i => i.toString).toMat(JSink.head().asScala)(Keep.right)
     val result: String = Source.single(1)
-      .via(CachedFlow({ (i: Int) => i }, cache = ()=>cache, calculator = cachedFlow))
+      .via(CachedFlow( (i: Int) => i, cache = ()=>cache, valueExtractor = cachedFlow))
       .runWith(Sink.head[String])(matFromSystem(ActorSystem())).asJava.toCompletableFuture.get();
     assertEquals("1", result)
     assertEquals(1, cache.keySet().size())
@@ -57,7 +77,7 @@ class CachedFlowSuite extends munit.FunSuite {
       .flatMapConcat(s=>Source.failed(new Exception())).toMat(Sink.head)(Keep.right)
     intercept[Exception] {
       val f = Source.single(1)
-        .via(CachedFlow({ (i: Int) => i }, cache = ()=>cache, calculator = cachedFlow))
+        .via(CachedFlow({ (i: Int) => i }, cache = ()=>cache, valueExtractor = cachedFlow))
         .delay(1.second, DelayOverflowStrategy.backpressure)
         .runWith(Sink.seq[String])(matFromSystem(ActorSystem()))
       Await.result(f,1.second)
@@ -79,7 +99,7 @@ class CachedFlowSuite extends munit.FunSuite {
         .toMat(Sink.head)(Keep.right)
     intercept[Exception] {
       val f = Source.single(1)
-        .via(CachedFlow({ (i: Int) => i }, cache = ()=> cache, calculator = cachedFlow,CachedFlow.Config(cacheFailure = true)))
+        .via(CachedFlow({ (i: Int) => i }, cache = ()=> cache, valueExtractor = cachedFlow,CachedFlow.Config(cacheFailure = true)))
         .delay(1.second, DelayOverflowStrategy.backpressure)
         .runWith(Sink.seq[String])(matFromSystem(ActorSystem()))
       Await.result(f, 1.second)

@@ -22,10 +22,10 @@ object CachedFlow {
     * @return
     */
   def apply[I, O, KEY, CACHED](
-      keyExtractor: I => KEY,
-      cache: ()=>ConcurrentMap[KEY, CACHED],
-      calculator: Sink[I, Future[O]],
-      config:Config = Config(cacheFailure = false),
+                                keyExtractor: I => KEY,
+                                cache: ()=>ConcurrentMap[KEY, CACHED],
+                                valueExtractor: Sink[I, CACHED],
+                                config:Config = Config(cacheFailure = false),
   )(using toCached: Conversion[Future[O], CACHED])(using toFuture: Conversion[CACHED, Future[O]]): Flow[I, O, NotUsed] = Flow
     .fromGraph(
       new CachedFlow[I, O, KEY, CACHED](
@@ -34,20 +34,20 @@ object CachedFlow {
         toFuture,
         cache,
         config,
-        (system:ActorSystem,input:I)=> Source.single(input).runWith[Future[O]](calculator)(Materializer(system))
+        (system:ActorSystem,input:I)=> Source.single(input).runWith[CACHED](valueExtractor)(Materializer(system))
       )
     )
     .flatMapConcat(Source.future)
 }
 
-given [T]: Conversion[Future[T], CompletionStage[T]] with
+given FutureToCompletionStage[T]: Conversion[Future[T], CompletionStage[T]] with
   override def apply(f: Future[T]): CompletionStage[T] =
     f.asJava
 
-given [T]: Conversion[T, T] with
+given SelfToSelf[T]: Conversion[T, T] with
   override def apply(t: T): T = t
 
-given [T]: Conversion[CompletionStage[T], Future[T]] with
+given CompletionStageToFuture[T]: Conversion[CompletionStage[T], Future[T]] with
   override def apply(cs: CompletionStage[T]): Future[T] =
     cs.asScala
 
@@ -60,7 +60,7 @@ class CachedFlow[I, O, KEY, CACHED](
     val toFuture: (CACHED => Future[O]),
     val cacheBuilder: (() => ConcurrentMap[KEY, CACHED]),
     val config:scaladsl.CachedFlow.Config,
-    val futureCalculator: (ActorSystem,I)=>CACHED
+    val valueCalculator: (ActorSystem,I)=>CACHED
 ) extends GraphStage[FlowShape[I, Future[O]]] {
 
   val in             = Inlet[I]("CachedFlow.in")
@@ -83,7 +83,7 @@ class CachedFlow[I, O, KEY, CACHED](
                 cache.computeIfAbsent(
                   keyExtractor(value),
                   (k => {
-                    val f = toFuture(futureCalculator(materializer.system,value))
+                    val f = toFuture(valueCalculator(materializer.system,value))
                     val handled = f.transform {
                       case f @ Failure(_) =>
                         // don't cache failures
