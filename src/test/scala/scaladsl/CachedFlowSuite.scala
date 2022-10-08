@@ -107,7 +107,6 @@ class CachedFlowSuite extends munit.FunSuite {
     import concurrent.ExecutionContext.Implicits.global
     import concurrent.duration.DurationInt
 
-    given config:Config = Config(cacheFailure = true)
     val cache = new ConcurrentHashMap[Int, Future[String]]()
     val cachedFlow: Sink[Int, Future[String]] =
       Flow.fromFunction[Int, String](i => i.toString)
@@ -115,7 +114,7 @@ class CachedFlowSuite extends munit.FunSuite {
         .toMat(Sink.head)(Keep.right)
     intercept[Exception] {
       val f = Source.single(1)
-        .via(CachedFlow( (i: Int) => i , cache = ()=> cache, valueExtractor = cachedFlow))
+        .via(CachedFlow( (i: Int) => i , cache = ()=> cache, valueExtractor = cachedFlow)(using Config(cacheFailure = true)))
         .delay(1.second, DelayOverflowStrategy.backpressure)
         .runWith(Sink.seq[String])(matFromSystem(ActorSystem()))
       Await.result(f, 1.second)
