@@ -24,3 +24,10 @@ jobs:
         cache: 'sbt'
     - name: Run tests
       run: sbt test
+    - name: Publish Test Results
+        # You may pin to the exact commit or the version.
+        # uses: EnricoMi/publish-unit-test-result-action@2a60c5d47eb29cd5cc922f51bbea18e148f56203
+      uses: EnricoMi/publish-unit-test-result-action@v2.0.0
+      with:
+        # File patterns of JUnit XML test result files. Supports *, **, ?, and []. Use multiline string for multiple patterns. Patterns starting with ! exclude the matching files. There have to be at least one pattern starting without a `!`.
+        junit_files: "target/test-reports/**.xml"
