@@ -24,65 +24,10 @@ jobs:
         cache: 'sbt'
     - name: Run tests
       run: sbt test
-- name: Publish Test Results
-  # You may pin to the exact commit or the version.
-  # uses: EnricoMi/publish-unit-test-result-action@2a60c5d47eb29cd5cc922f51bbea18e148f56203
-  uses: EnricoMi/publish-unit-test-result-action@v2.0.0
-  with:
-    # GitHub API Access Token
-    github_token: # optional, default is ${{ github.token }}
-    # Requests to the GitHub API are retried this number of times. The value must be a positive integer or zero.
-    github_retries: # optional, default is 10
-    # Commit SHA to which test results are published. Only needed if the value of GITHUB_SHA does not work for you.
-    commit: # optional
-    # Name of the created check run
-    check_name: # optional, default is Test Results
-    # An alternative title for the pull request comment. Defaults to value of check_name input
-    comment_title: # optional
-    # The action posts comments to pull requests that are associated with the commit. Set to "always" - always comment, "changes" - comment when changes w.r.t. the target branch exist, "changes in failures" - when changes in the number of failures and errors exist, "changes in errors" - when changes in the number of (only) errors exist, "failures" - when failures or errors exist, "errors" - when (only) errors exist, "off" - to not create pull request comments
-    comment_mode: # optional, default is always
-    # The created test result check run has failure state if any test fails or test errors occur. Never fails when set to "nothing", fails only on errors when set to "errors". Default is "test failures".
-    fail_on: # optional, default is test failures
-    # Deprecated, use "junit_files" instead.
-    files: # optional
-    # File patterns of JUnit XML test result files. Supports *, **, ?, and []. Use multiline string for multiple patterns. Patterns starting with ! exclude the matching files. There have to be at least one pattern starting without a `!`.
-    junit_files: 
-    target/test-reports/**.xml
-    # File patterns of NUnit XML test result files. Supports *, **, ?, and []. Use multiline string for multiple patterns. Patterns starting with ! exclude the matching files. There have to be at least one pattern starting without a `!`.
-    nunit_files: # optional
-    # File patterns of XUnit XML test result files. Supports *, **, ?, and []. Use multiline string for multiple patterns. Patterns starting with ! exclude the matching files. There have to be at least one pattern starting without a `!`.
-    xunit_files: # optional
-    # File patterns of TRX test result files. Supports *, **, ?, and []. Use multiline string for multiple patterns. Patterns starting with ! exclude the matching files. There have to be at least one pattern starting without a `!`.
-    trx_files: # optional
-    # Time values in the test result files have this unit. Supports "seconds" and "milliseconds".
-    time_unit: # optional, default is seconds
-    # Individual runs of the same test may see different failures. Reports all individual failures when set "true" or the first only otherwise
-    report_individual_runs: # optional
-    # De-duplicates classes with same name by their file name when set "true", combines test results for those classes otherwise
-    deduplicate_classes_by_file_name: # optional
-    # Does not collect test run information from the test result files, which is useful for very large files. This disables any check run annotations
-    ignore_runs: # optional, default is false
-    # Set to "true", the results are published as part of the job summary page of the workflow run
-    job_summary: # optional, default is true
-    # Test results are compared to results of earlier commits to highlight changes: "false" - disable comparison, "true" - compare across commits
-    compare_to_earlier_commit: # optional, default is true
-    # As part of pull requests, GitHub builds a merge commit, which combines the commit and the target branch. If tests ran on the actual pushed commit, then set this to "commit". Defaults to "merge".
-    pull_request_build: # optional, default is merge
-    # An alternative event file to use. Useful to replace a "workflow_run" event file with the actual source event file.
-    event_file: # optional
-    # An alternative event name to use. Useful to replace a "workflow_run" event name with the actual source event name: github.event.workflow_run.event.
-    event_name: # optional
-    # Limits the number of removed or skipped tests reported on pull request comments. This report can be disabled with a value of 0. The default is 10.
-    test_changes_limit: # optional
-    # Adds additional information to the check run. This is a comma-separated list of any of the following values: "all tests" - list all found tests, "skipped tests" - list all skipped tests. Set to "none" to add no extra annotations at all
-    check_run_annotations: # optional, default is all tests, skipped tests
-    # Adds check run annotations only on given branches. Comma-separated list of branch names allowed, asterisk "*" matches all branches. Defaults to event.repository.default_branch or "main, master".
-    check_run_annotations_branch: # optional
-    # Sets the number of seconds the action waits between concurrent read requests to the GitHub API. This throttles the API usage to avoid abuse rate limits: https://docs.github.com/en/rest/overview/resources-in-the-rest-api#abuse-rate-limits
-    seconds_between_github_reads: # optional, default is 0.25
-    # Sets the number of seconds the action waits between concurrent write requests to the GitHub API. This throttles the API usage to avoid abuse rate limits: https://docs.github.com/en/rest/overview/resources-in-the-rest-api#abuse-rate-limits
-    seconds_between_github_writes: # optional, default is 2.0
-    # Results are written to this JSON file.
-    json_file: # optional
-    # Formatted numbers in JSON use this character to separate groups of thousands. Common values are "," or ".". Defaults to punctuation space (\u2008).
-    json_thousands_separator: # optional, default is  
+    - name: Publish Test Results
+        # You may pin to the exact commit or the version.
+        # uses: EnricoMi/publish-unit-test-result-action@2a60c5d47eb29cd5cc922f51bbea18e148f56203
+      uses: EnricoMi/publish-unit-test-result-action@v2.0.0
+      with:
+        # File patterns of JUnit XML test result files. Supports *, **, ?, and []. Use multiline string for multiple patterns. Patterns starting with ! exclude the matching files. There have to be at least one pattern starting without a `!`.
+        junit_files: "target/test-reports/**.xml"
