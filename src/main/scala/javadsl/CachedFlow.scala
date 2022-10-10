@@ -16,11 +16,11 @@ object CachedFlow {
 
   @static case class Config(cacheFailure: java.lang.Boolean)
 
-  /**
-   *
-   * @param keyExtractor
+  /** @param keyExtractor
    * @param cache
-   * @param calculator Takes the first result from the flow to cache.  To cache multiple results in the flow, apply Flow.collect
+   * @param calculator
+   * Takes the first result from the flow to cache. To cache multiple results
+   * in the flow, apply Flow.collect
    * @param config
    * @tparam I
    * @tparam O
@@ -32,11 +32,16 @@ object CachedFlow {
                         cache: Supplier[ConcurrentMap[KEY, CompletionStage[O]]],
                         calculator: JFlow[I, O, NotUsed],
                         config: Config = Config(cacheFailure = false)
-  ): JFlow[I, O, NotUsed] = {
+                      ): JFlow[I, O, NotUsed] = {
 
-    val calc: JSink[I,CompletionStage[O]] = calculator.toMat(JSink.head[O](),akka.stream.javadsl.Keep.right[akka.NotUsed,CompletionStage[O]])
+    val calc: JSink[I, CompletionStage[O]] = calculator.toMat(
+      JSink.head[O](),
+      akka.stream.javadsl.Keep.right[akka.NotUsed, CompletionStage[O]]
+    )
 
-    val f: (ActorSystem,I)=>CompletionStage[O] = (system:ActorSystem,input:I)=> Source.single(input).runWith(calc)(Materializer(system))
+    val f: (ActorSystem, I) => CompletionStage[O] =
+      (system: ActorSystem, input: I) =>
+        Source.single(input).runWith(calc)(Materializer(system))
     Flow
       .fromGraph(
         new CachedFlow[I, O, KEY, CompletionStage[O]](
@@ -48,6 +53,7 @@ object CachedFlow {
           f
         )
       )
-      .flatMapConcat(Source.future).asJava
+      .flatMapConcat(Source.future)
+      .asJava
   }
 }

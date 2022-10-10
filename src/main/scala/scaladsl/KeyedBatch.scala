@@ -16,55 +16,72 @@ import scala.jdk.FutureConverters.*
 import scala.jdk.javaapi
 import scala.concurrent.duration.FiniteDuration
 
-object KeyedBatch{
+object KeyedBatch {
 
   def apply[I, K, ICOLLECTION, OFUTURE, O](
                                             maxElements: Int,
                                             batchWait: FiniteDuration,
                                             key: I => K,
-                                            batchEvaluator: (K, ICOLLECTION) => OFUTURE)
-                                          (using toFuture: Conversion[OFUTURE, Future[O]])
-                                          (using toICollection: Conversion[Seq[I], ICOLLECTION]): Flow[I, Map[K, O], NotUsed] = {
+                                            batchEvaluator: (K, ICOLLECTION) => OFUTURE
+                                          )(using toFuture: Conversion[OFUTURE, Future[O]])(using
+                                                                                            toICollection: Conversion[Seq[I], ICOLLECTION]
+                                          ): Flow[I, Map[K, O], NotUsed] = {
 
-    val grouped: Flow[I, Seq[I], NotUsed] = Flow.apply[I].groupedWithin(maxElements, batchWait);
+    val grouped: Flow[I, Seq[I], NotUsed] =
+      Flow.apply[I].groupedWithin(maxElements, batchWait);
 
     val batch: Flow[Seq[I], Future[Map[K, O]], NotUsed] = Flow.fromGraph(
       new KeyedBatch[I, K, ICOLLECTION, OFUTURE, O](
-        key, (_: ActorSystem, key: K, iCollection: ICOLLECTION) => batchEvaluator(key, iCollection),
-        toICollection, toFuture
-      ));
+        key,
+        (_: ActorSystem, key: K, iCollection: ICOLLECTION) =>
+          batchEvaluator(key, iCollection),
+        toICollection,
+        toFuture
+      )
+    );
     grouped.via(batch).flatMapConcat((o: Future[Map[K, O]]) => Source.future(o))
 
   }
 
 }
-class KeyedBatch[I,K,ICOLLECTION,OFUTURE,O]
-    (key: I => K,
-     batchEvaluator: (ActorSystem,K, ICOLLECTION) => OFUTURE,
-     toICollection:Seq[I]=>ICOLLECTION,
-     toFuture:OFUTURE=>Future[O]) extends GraphStage[FlowShape[Seq[I], Future[Map[K,O]]]] {
+
+class KeyedBatch[I, K, ICOLLECTION, OFUTURE, O](
+                                                 key: I => K,
+                                                 batchEvaluator: (ActorSystem, K, ICOLLECTION) => OFUTURE,
+                                                 toICollection: Seq[I] => ICOLLECTION,
+                                                 toFuture: OFUTURE => Future[O]
+                                               ) extends GraphStage[FlowShape[Seq[I], Future[Map[K, O]]]] {
 
   val in = Inlet[Seq[I]]("KeyedForkJoin.in")
-  val out = Outlet[Future[Map[K,O]]]("KeyedForkJoin.out")
+  val out = Outlet[Future[Map[K, O]]]("KeyedForkJoin.out")
   override val shape = FlowShape.of(in, out)
 
   override def createLogic(inheritedAttributes: Attributes): GraphStageLogic =
     new GraphStageLogic(shape) {
 
+      setHandler(
+        in,
+        new InHandler {
+          override def onPush(): Unit = {
+            val actorSystem = materializer.system
+            implicit val ec: ExecutionContext = actorSystem.dispatcher
 
-      setHandler(in, new InHandler {
-        override def onPush(): Unit = {
-          val actorSystem = materializer.system
-          implicit val ec: ExecutionContext = actorSystem.dispatcher
-
-          val batch = grab(in)
-          val futures: Map[K, Future[(K, O)]] = batch.groupBy(key)
-            .map((k, seq) => (k, toFuture(batchEvaluator(actorSystem, k, toICollection(seq))).map(o => (k, o))(actorSystem.dispatcher)));
-          val values = Future.sequence(futures.values)
-          val batchMap = values.map(results => Map.from(results))
-          emit(out, batchMap)
+            val batch = grab(in)
+            val futures: Map[K, Future[(K, O)]] = batch
+              .groupBy(key)
+              .map((k, seq) =>
+                (
+                  k,
+                  toFuture(batchEvaluator(actorSystem, k, toICollection(seq)))
+                    .map(o => (k, o))(actorSystem.dispatcher)
+                )
+              );
+            val values = Future.sequence(futures.values)
+            val batchMap = values.map(results => Map.from(results))
+            emit(out, batchMap)
+          }
         }
-      })
+      )
 
       setHandler(
         out,
