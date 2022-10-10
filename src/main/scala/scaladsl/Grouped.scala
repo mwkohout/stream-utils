@@ -18,6 +18,15 @@ import scala.jdk.DurationConverters.*
 
 object Grouped {}
 
+/**
+ * WIP
+ *
+ * @param pushLogic
+ * @param bufferConverter
+ * @param interval
+ * @tparam I
+ * @tparam PENDINGBUFFER
+ */
 class Grouped[I, PENDINGBUFFER](
                                  val pushLogic: (PENDINGBUFFER) => Boolean,
                                  val bufferConverter: mutable.Buffer[I] => PENDINGBUFFER,
